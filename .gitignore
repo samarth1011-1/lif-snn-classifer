@@ -1,0 +1,6 @@
+# Simulation build artifacts and waveforms
+output
+output_*
+*.vcd
+*.out
+sim/
