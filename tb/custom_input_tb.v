@@ -6,11 +6,11 @@ module custom_input_tb;
 
     // Put your 5x5 test pattern here (1 = ON, 0 = OFF)
     localparam [24:0] CUSTOM = {
-        5'b11111, // row 4 (top)
-        5'b00001, // row 3
-        5'b11111, // row 2
-        5'b00001, // row 1
-        5'b11111  // row 0 (bottom)
+        5'b10011, // row 4 (top)
+        5'b01010, // row 3
+        5'b10100, // row 2
+        5'b01010, // row 1
+        5'b10010  // row 0 (bottom)
     };
 
     localparam NUM_INPUTS = 25;
