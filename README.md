@@ -53,7 +53,7 @@ The core goal is to quantify the hardware area vs. throughput trade-off between 
 * **Parallel (`snn_top_parallel.v`)**: instantiates one dedicated MAC and LIF neuron per class. Evaluates all classes every clock and finishes in **64 cycles** regardless of class count, but area grows linearly with `N`.
 * **Time-Multiplexed / TDM (`snn_top_tdm.v`)**: shares one MAC and one combinational LIF core across all `N` classes round-robin, storing neuron states in centralized register arrays. Keeps compute area flat while trading off latency (`N * 64` cycles).
 
-A bit-accurate Python golden model (`model/lif_neuron.py`) is included to verify both RTL designs down to the exact spike count.
+A bit-accurate Python golden model (`model/lif_neuron.py`) is included to verify both RTL designs down to the exact spike count. Currently targeting digits `0` to `3`, the architecture is parameterized so it can be scaled up to `0-10`, `0-50`, and `0-100` classes in future iterations—which is why characterizing the TDM area-vs.-latency trade-off is central to the design.
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
 
@@ -180,6 +180,27 @@ Both Verilog testbenches and `model/lif_neuron.py` match bit-for-bit across all 
    yosys -c scripts/sweep_parallel.tcl
    yosys -c scripts/sweep_tdm.tcl
    ```
+
+### Testing a Custom 5x5 Digit
+
+You can test any custom 5x5 pattern by editing the `CUSTOM` bitmap (`1` = ON, `0` = OFF) at the top of `tb/custom_input_tb.v`:
+
+```verilog
+localparam [24:0] CUSTOM = {
+    5'b01110, // row 4 (top)
+    5'b10001, // row 3
+    5'b10001, // row 2
+    5'b10001, // row 1
+    5'b01110  // row 0 (bottom)
+};
+```
+
+Then compile and run it to print the per-neuron spike histogram and predicted class:
+
+```sh
+iverilog -g2012 -o sim/output_custom rtl/lif_neuron.v rtl/weight_mac.v rtl/spike_counter.v rtl/snn_top_parallel.v tb/custom_input_tb.v
+vvp sim/output_custom
+```
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
 
