@@ -1,6 +1,8 @@
 """
 Bit-accurate Python model of the LIF SNN Pattern Detector.
-Matches the Verilog RTL (lif_neuron.v, weight_mac.v, spike_counter.v, snn_top_parallel.v).
+Matches the Verilog RTL:
+  - Parallel: lif_neuron.v, weight_mac.v, spike_counter.v, snn_top_parallel.v
+  - TDM:      weight_mac.v, snn_top_tdm.v
 """
 
 # Stored 5x5 templates for digits 0 to 3 (row-major, MSB = top-left)
@@ -67,28 +69,23 @@ class SNNClassifier:
         self.neurons = [LIFNeuron(v_th=v_th, k=k) for _ in range(4)]
 
     def classify(self, pattern, warmup_cycles=2):
-        # Compute input current for all 4 neurons
         currents = [
             compute_mac(pattern, tmpl, self.w_on, self.w_off)
             for tmpl in TEMPLATES
         ]
 
-        # Reset neuron potentials
         for n in self.neurons:
             n.reset()
 
-        # In the RTL testbench, input is applied 2 cycles before classify_start
         for _ in range(warmup_cycles):
             for i, n in enumerate(self.neurons):
                 n.step(currents[i])
 
-        # 64-cycle observation window
         counts = [0, 0, 0, 0]
         for _ in range(self.window_len):
             for i, n in enumerate(self.neurons):
                 counts[i] += n.step(currents[i])
 
-        # Argmax with lowest-index tie breaking (matches spike_counter.v)
         predicted = 0
         max_c = 0
         for i, c in enumerate(counts):
@@ -104,6 +101,55 @@ class SNNClassifier:
         }
 
 
+class SNNClassifierTDM:
+    """Models snn_top_tdm.v: 1 shared MAC + 1 shared LIF core evaluating classes round-robin."""
+
+    def __init__(self, v_th=384, k=5, window_len=64, w_on=16, w_off=-32, num_classes=4):
+        self.v_th = v_th
+        self.k = k
+        self.window_len = window_len
+        self.w_on = w_on
+        self.w_off = w_off
+        self.num_classes = num_classes
+
+    def classify(self, pattern):
+        currents = [
+            compute_mac(pattern, TEMPLATES[c], self.w_on, self.w_off)
+            for c in range(self.num_classes)
+        ]
+
+        vmem_state = [0] * self.num_classes
+        spike_counts = [0] * self.num_classes
+
+        # 256 clock cycles (round-robin: 1 neuron per cycle)
+        for _ in range(self.window_len):
+            for c in range(self.num_classes):
+                v_mem = vmem_state[c]
+                leak = (v_mem + (1 << self.k) - 1) >> self.k
+                decayed = v_mem - leak
+                v_next = sat_add(decayed, currents[c])
+
+                if v_next >= self.v_th:
+                    spike_counts[c] += 1
+                    vmem_state[c] = 0
+                else:
+                    vmem_state[c] = v_next
+
+        predicted = 0
+        max_c = 0
+        for i, cnt in enumerate(spike_counts):
+            if cnt > max_c:
+                max_c = cnt
+                predicted = i
+
+        return {
+            "currents": currents,
+            "counts": spike_counts,
+            "predicted": predicted,
+            "rejected": (max(spike_counts) == 0)
+        }
+
+
 def print_pattern(pat):
     for r in range(4, -1, -1):
         row_bits = (pat >> (r * 5)) & 0x1F
@@ -112,7 +158,8 @@ def print_pattern(pat):
 
 
 def run_tests():
-    classifier = SNNClassifier(v_th=384, k=5, window_len=64)
+    classifier_par = SNNClassifier(v_th=384, k=5, window_len=64)
+    classifier_tdm = SNNClassifierTDM(v_th=384, k=5, window_len=64)
 
     test_cases = [
         ("Digit 0", TEMPLATES[0], 0),
@@ -123,28 +170,29 @@ def run_tests():
         ("All Ones (Reject)", (1 << 25) - 1, None),
     ]
 
-    print("=" * 60)
-    print(" SNN Python Model Test Suite (matches Verilog simulation)")
-    print("=" * 60)
+    print("=" * 65)
+    print(" SNN Python Model Test Suite: Parallel vs TDM")
+    print("=" * 65)
 
     for name, pat, expected in test_cases:
-        res = classifier.classify(pat)
-        counts = res["counts"]
-        pred = res["predicted"]
+        res_par = classifier_par.classify(pat)
+        res_tdm = classifier_tdm.classify(pat)
 
         print(f"\n{name}:")
         print_pattern(pat)
-        print(f"  Currents: {res['currents']}")
-        print(f"  Spikes:   n0={counts[0]} n1={counts[1]} n2={counts[2]} n3={counts[3]}")
+        print(f"  Parallel Spikes: {res_par['counts']} -> Class {res_par['predicted']}")
+        print(f"  TDM Spikes:      {res_tdm['counts']} -> Class {res_tdm['predicted']}")
 
         if expected is None:
-            status = "PASS (rejected as expected)" if res["rejected"] else "FAIL"
-            print(f"  Result:   {status}")
+            match = res_par["rejected"] and res_tdm["rejected"]
+            status = "PASS (both rejected)" if match else "FAIL"
         else:
-            status = "PASS" if pred == expected else "FAIL"
-            print(f"  Result:   Predicted = {pred} (expected {expected}) -> {status}")
+            match = (res_par["predicted"] == expected) and (res_tdm["predicted"] == expected)
+            status = f"PASS (both match expected {expected})" if match else "FAIL"
 
-    print("\n" + "=" * 60)
+        print(f"  Verification:    {status}")
+
+    print("\n" + "=" * 65)
 
 
 if __name__ == "__main__":
