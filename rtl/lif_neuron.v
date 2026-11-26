@@ -16,10 +16,10 @@ wire spike_cond;
 // Round-up leak: ceiling division by 2^K
 // leak_amt = (v_mem_reg + (2^K - 1)) >> K
 // This guarantees any nonzero v_mem_reg leaks at least 1, so Vmem always decays to 0.
-assign leak_amt = (v_mem_reg + ((16'd1 << K) - 1)) >> K;  // { v_mem_reg + (2^K - 1) / 2^K }
+assign leak_amt = (v_mem_reg + ((16'd1 << K) - 1)) >> K;  // { (v_mem_reg + (2^K - 1)) / 2^K }
 assign decayed = v_mem_reg - leak_amt;
 assign sum_wire = decayed + i_input;
-assign v_mem_next = (sum_wire[16])?16'hFFFF:sum_wire[15:0];
+assign v_mem_next = (sum_wire[16])? 16'hFFFF : sum_wire[15:0];
 assign spike_cond = (v_mem_next >= V_TH);
 
 // Debug output: expose membrane voltage
@@ -42,3 +42,7 @@ always@(posedge clk) begin
         end
 end
 endmodule
+
+// to-do: 
+// tweak the leak factor(K) by trial and error maybe?
+// add refractory period 
